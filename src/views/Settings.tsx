@@ -450,13 +450,44 @@ const SettingsView = ({ isSystemActive }: SettingsProps) => {
                       onClick={async () => {
                         playClick();
                         try {
-                          const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+                          let hasAudio = true;
+                          let hasVideo = true;
+
+                          try {
+                            const devices = await navigator.mediaDevices.enumerateDevices();
+                            hasAudio = devices.some(d => d.kind === 'audioinput');
+                            hasVideo = devices.some(d => d.kind === 'videoinput');
+                            
+                            if (devices.length > 0 && !hasAudio && !hasVideo) {
+                              throw new Error("No camera or microphone hardware was detected on your machine.");
+                            }
+                          } catch (de) {
+                            console.warn("Device enumeration failed:", de);
+                          }
+
+                          const constraints: MediaStreamConstraints = {};
+                          if (hasAudio) constraints.audio = true;
+                          if (hasVideo) constraints.video = true;
+
+                          if (Object.keys(constraints).length === 0) {
+                            constraints.audio = true;
+                            constraints.video = true;
+                          }
+
+                          const stream = await navigator.mediaDevices.getUserMedia(constraints);
                           stream.getTracks().forEach(t => t.stop());
                           localStorage.setItem('iris_permissions_granted', 'true');
                           alert("Permissions granted successfully.");
                           playAction();
                         } catch(e: any) {
-                          alert(`Permission Denied: ${e.message || 'Please allow camera and mic permissions in your browser.'}`);
+                          const inIframe = window.self !== window.top;
+                          if (inIframe) {
+                            alert("⚠️ Access Blocked by Iframe Sandbox\n\nBrowsers deny camera/mic access inside nested preview windows.\n\nPlease click the 'Open in New Tab' icon in the top-right corner of the preview pane to request and grant permissions.");
+                          } else if (e.name === 'NotAllowedError' || e.name === 'PermissionDeniedError' || e.message?.toLowerCase().includes('not allowed')) {
+                            alert("Permission Denied: Access blocked by browser or system settings. Please grant permissions near the address bar.");
+                          } else {
+                            alert(`Permission Request Failed: ${e.message || 'Please ensure you have dedicated camera and microphone hardware connected.'}`);
+                          }
                         }
                       }}
                       className="whitespace-nowrap px-4 py-2 bg-white text-black text-[10px] font-bold rounded hover:bg-zinc-200 transition-colors uppercase tracking-widest focus-visible:ring-2 focus-visible:ring-emerald-500"

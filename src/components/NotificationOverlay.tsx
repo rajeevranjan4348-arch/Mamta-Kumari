@@ -42,6 +42,18 @@ const Toast = ({ notification }: { notification: Notification }) => {
       <div className="flex-1">
         <h4 className="text-sm font-bold text-zinc-100">{notification.title}</h4>
         <p className="text-xs text-zinc-400 mt-1">{notification.message}</p>
+        
+        {notification.action && (
+          <button
+            onClick={() => {
+              notification.action!.onClick();
+              removeNotification(notification.id);
+            }}
+            className="mt-3 px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-xs font-bold text-white rounded transition-colors"
+          >
+            {notification.action.label}
+          </button>
+        )}
       </div>
       <button
         onClick={() => removeNotification(notification.id)}

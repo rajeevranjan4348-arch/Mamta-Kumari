@@ -481,9 +481,29 @@ const IRIS = (props: IrisProps) => {
           break
         case 'getWeather':
           notify(`Checking weather for ${args.location}...`, 'info')
-          // Mock weather
-          setTimeout(() => notify(`Weather in ${args.location}: 72°F, Sunny`, 'success'), 1500)
-          break
+          return fetch(`https://wttr.in/${encodeURIComponent(args.location)}?format=j1`)
+            .then(res => res.json())
+            .then(data => {
+              const current = data.current_condition?.[0]
+              if (current) {
+                notify(`${args.location} Weather: ${current.temp_C}°C, ${current.weatherDesc?.[0]?.value}`, 'success')
+                window.dispatchEvent(new CustomEvent('show-weather', { detail: { location: args.location, data } }))
+                return { 
+                  result: "Success",
+                  temperature: `${current.temp_C}C / ${current.temp_F}F`,
+                  condition: current.weatherDesc?.[0]?.value,
+                  humidity: current.humidity,
+                  forecast: data.weather?.[1] ? `Tomorrow's high will be ${data.weather[1].maxtempC}C` : ''
+                }
+              } else {
+                notify(`Failed to resolve weather for ${args.location}`, 'warning')
+                return { error: "Failed to resolve weather" }
+              }
+            })
+            .catch(() => {
+              notify(`Failed to get weather for ${args.location}`, 'warning')
+              return { error: "Network fetch failed" }
+            })
         case 'setTimer':
           notify(`Timer set for ${args.minutes} minutes.`, 'success')
           break

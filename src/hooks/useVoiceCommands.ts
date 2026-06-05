@@ -10,6 +10,7 @@ interface VoiceCommandActions {
   isVideoOn: boolean;
   setActiveTab: (tab: string) => void;
   getActiveTab?: () => string;
+  triggerOCR?: () => void;
 }
 
 export function useVoiceCommands(actions: VoiceCommandActions) {
@@ -77,6 +78,13 @@ export function useVoiceCommands(actions: VoiceCommandActions) {
            recognizedAction = "Switching to Screen Share";
          } else if (/\b(stop|turn off|disable|hide|unshare)\b/i.test(command)) {
            if (currActions.isVideoOn) { currActions.stopVision(); recognizedAction = "Stopping Screen Share"; }
+         }
+      }
+
+      if (/\b(read text|read out loud|ocr|read the screen|what does it say)\b/i.test(command)) {
+         if (currActions.triggerOCR) {
+            currActions.triggerOCR();
+            recognizedAction = "Reading Text on Screen";
          }
       }
 

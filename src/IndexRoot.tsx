@@ -69,15 +69,58 @@ const IndexRoot = () => {
 
   const requestPermissions = async () => {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
+      let hasAudio = true;
+      let hasVideo = true;
+
+      try {
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        hasAudio = devices.some(d => d.kind === 'audioinput');
+        hasVideo = devices.some(d => d.kind === 'videoinput');
+        
+        if (devices.length > 0 && !hasAudio && !hasVideo) {
+          throw new Error("No camera or microphone hardware was detected on your machine.");
+        }
+      } catch (e) {
+        console.warn("Device enumeration failed or blocked:", e);
+      }
+
+      const constraints: MediaStreamConstraints = {};
+      if (hasAudio) {
+        constraints.audio = {
+          noiseSuppression: true,
+          echoCancellation: true,
+          autoGainControl: true
+        };
+      }
+      if (hasVideo) {
+        constraints.video = { width: 640, height: 480 };
+      }
+
+      // Fallback if structure ended up empty
+      if (Object.keys(constraints).length === 0) {
+        constraints.audio = true;
+        constraints.video = true;
+      }
+
+      const stream = await navigator.mediaDevices.getUserMedia(constraints);
       stream.getTracks().forEach(track => track.stop());
       localStorage.setItem('iris_permissions_granted', 'true');
       setShowPermissionsModal(false);
       setPermissionDeniedReason(null);
       playClick();
-    } catch (error) {
+    } catch (error: any) {
       console.error("Permission request failed", error);
-      setPermissionDeniedReason("Camera/Microphone access was denied. Please enable it in your browser settings (look for the site settings icon in your address bar).");
+      
+      const inIframe = window.self !== window.top;
+      if (inIframe) {
+        setPermissionDeniedReason("Browsers deny microphone and camera hardware access inside nested preview frames. Please click the 'Open in New Tab' icon at the top-right of your preview pane to launch IRIS in a dedicated tab and grant permissions, or click skip.");
+      } else if (error.name === 'NotAllowedError' || error.name === 'PermissionDeniedError' || error.message?.toLowerCase().includes('not allowed')) {
+        setPermissionDeniedReason("The browser or operating system has blocked media access. Please verify your browser's page permissions (near the address bar) and System Settings.");
+      } else if (error.name === 'NotFoundError' || error.name === 'DevicesNotFoundError' || error.message?.toLowerCase().includes('no camera')) {
+        setPermissionDeniedReason("No camera or microphone hardware was detected connected to your system.");
+      } else {
+        setPermissionDeniedReason(`Permission request failed: ${error.message || error}`);
+      }
     }
   };
 
@@ -259,6 +302,90 @@ const IndexRoot = () => {
     }
   }
 
+  const runOCR = (triggerReadOutLoud = false) => {
+    if (!workerRef.current || ocrRunningRef.current) return;
+    const vid = processingVideoRef.current;
+    if (!vid || vid.readyState < 2) return;
+    
+    ocrRunningRef.current = true;
+    
+    const ocrMaxDim = 1920;
+    let ocrWidth = vid.videoWidth || 1920;
+    let ocrHeight = vid.videoHeight || 1080;
+    
+    if (ocrWidth > ocrMaxDim || ocrHeight > ocrMaxDim) {
+      const ratio = ocrWidth / ocrHeight;
+      if (ratio > 1) {
+        ocrWidth = ocrMaxDim;
+        ocrHeight = Math.round(ocrMaxDim / ratio);
+      } else {
+        ocrHeight = ocrMaxDim;
+        ocrWidth = Math.round(ocrMaxDim * ratio);
+      }
+    }
+
+    if (!ocrCanvasRef.current) {
+      ocrCanvasRef.current = document.createElement('canvas');
+    }
+    if (ocrCanvasRef.current.width !== ocrWidth || ocrCanvasRef.current.height !== ocrHeight) {
+      ocrCanvasRef.current.width = ocrWidth;
+      ocrCanvasRef.current.height = ocrHeight;
+    }
+    
+    const ocrCanvas = ocrCanvasRef.current;
+    const ocrCtx = ocrCanvas.getContext('2d', { willReadFrequently: true });
+    
+    if (ocrCtx) {
+      ocrCtx.drawImage(vid, 0, 0, ocrWidth, ocrHeight);
+      const imageData = ocrCtx.getImageData(0, 0, ocrWidth, ocrHeight);
+      const data = imageData.data;
+      
+      let minGray = 255;
+      let maxGray = 0;
+      const grays = new Uint8Array(data.length / 4);
+      
+      let j = 0;
+      for (let i = 0; i < data.length; i += 4) {
+        const r = data[i], g = data[i + 1], b = data[i + 2];
+        const gray = Math.round(0.2126 * r + 0.7152 * g + 0.0722 * b);
+        grays[j++] = gray;
+        if (gray < minGray) minGray = gray;
+        if (gray > maxGray) maxGray = gray;
+      }
+      
+      const range = maxGray - minGray || 1;
+      j = 0;
+      for (let i = 0; i < data.length; i += 4) {
+        const stretched = ((grays[j++] - minGray) / range) * 255;
+        data[i] = stretched;
+        data[i + 1] = stretched;
+        data[i + 2] = stretched;
+      }
+      
+      ocrCtx.putImageData(imageData, 0, 0);
+      const ocrDataUrl = ocrCanvas.toDataURL('image/png');
+      
+      workerRef.current.recognize(ocrDataUrl).then(({ data: { text } }: any) => {
+        const cleanedText = text?.trim();
+        setOcrText(cleanedText || '');
+        if (triggerReadOutLoud) {
+          if (cleanedText && cleanedText.length > 2) {
+             irisService.sendText(`User requested to read the text on the screen. Please read this text out loud to the user exactly: ${cleanedText}`);
+          } else {
+             irisService.sendText(`User requested to read the text on the screen, but I couldn't detect any text right now.`);
+          }
+        } else if (cleanedText && cleanedText.length > 5) {
+           irisService.sendText(`[System Context - OCR detected on screen: ${cleanedText.substring(0, 500)}]`);
+        }
+        ocrRunningRef.current = false;
+      }).catch(() => {
+        ocrRunningRef.current = false;
+      });
+    } else {
+      ocrRunningRef.current = false;
+    }
+  };
+
   const startAIProcessing = () => {
     if (aiIntervalRef.current) clearInterval(aiIntervalRef.current)
 
@@ -307,83 +434,7 @@ const IndexRoot = () => {
 
           // Background OCR task - process less frequently than vision frames
           if (workerRef.current && !ocrRunningRef.current && Math.random() > 0.7) {
-            ocrRunningRef.current = true
-            
-            // Dedicated higher resolution for OCR
-            const ocrMaxDim = 1920;
-            let ocrWidth = vid.videoWidth || 1920;
-            let ocrHeight = vid.videoHeight || 1080;
-            
-            if (ocrWidth > ocrMaxDim || ocrHeight > ocrMaxDim) {
-              const ratio = ocrWidth / ocrHeight;
-              if (ratio > 1) {
-                ocrWidth = ocrMaxDim;
-                ocrHeight = Math.round(ocrMaxDim / ratio);
-              } else {
-                ocrHeight = ocrMaxDim;
-                ocrWidth = Math.round(ocrMaxDim * ratio);
-              }
-            }
-
-            if (!ocrCanvasRef.current) {
-              ocrCanvasRef.current = document.createElement('canvas')
-            }
-            if (ocrCanvasRef.current.width !== ocrWidth || ocrCanvasRef.current.height !== ocrHeight) {
-                ocrCanvasRef.current.width = ocrWidth;
-                ocrCanvasRef.current.height = ocrHeight;
-            }
-            
-            const ocrCanvas = ocrCanvasRef.current
-            const ocrCtx = ocrCanvas.getContext('2d', { willReadFrequently: true })
-            
-            if (ocrCtx) {
-              // Draw directly from the high-res video
-              ocrCtx.drawImage(vid, 0, 0, ocrWidth, ocrHeight)
-              
-              const imageData = ocrCtx.getImageData(0, 0, ocrWidth, ocrHeight)
-              const data = imageData.data
-              
-              // First pass: convert to grayscale and find min/max for auto-contrast
-              let minGray = 255;
-              let maxGray = 0;
-              const grays = new Uint8Array(data.length / 4);
-              
-              let j = 0;
-              for (let i = 0; i < data.length; i += 4) {
-                const r = data[i], g = data[i + 1], b = data[i + 2]
-                // Luminosity method
-                const gray = Math.round(0.2126 * r + 0.7152 * g + 0.0722 * b)
-                grays[j++] = gray;
-                if (gray < minGray) minGray = gray;
-                if (gray > maxGray) maxGray = gray;
-              }
-              
-              // Second pass: apply histogram stretching
-              const range = maxGray - minGray || 1; // prevent div by zero
-              j = 0;
-              for (let i = 0; i < data.length; i += 4) {
-                const stretched = ((grays[j++] - minGray) / range) * 255;
-                data[i] = stretched
-                data[i + 1] = stretched
-                data[i + 2] = stretched
-              }
-              
-              ocrCtx.putImageData(imageData, 0, 0)
-              const ocrDataUrl = ocrCanvas.toDataURL('image/png') // PNG often preferable for OCR
-              
-              workerRef.current.recognize(ocrDataUrl).then(({ data: { text } }: any) => {
-                const cleanedText = text?.trim()
-                setOcrText(cleanedText || '')
-                if (cleanedText && cleanedText.length > 5) {
-                   irisService.sendText(`[System Context - OCR detected on screen: ${cleanedText.substring(0, 500)}]`)
-                }
-                ocrRunningRef.current = false
-              }).catch(() => {
-                ocrRunningRef.current = false
-              })
-            } else {
-              ocrRunningRef.current = false
-            }
+            runOCR(false);
           }
         }
       }
@@ -411,7 +462,8 @@ const IndexRoot = () => {
     stopVision,
     isVideoOn,
     setActiveTab: (tab) => setActiveTabRef.current(tab),
-    getActiveTab: () => getActiveTabRef.current()
+    getActiveTab: () => getActiveTabRef.current(),
+    triggerOCR: () => runOCR(true)
   });
 
   useEffect(() => {
@@ -475,36 +527,42 @@ const IndexRoot = () => {
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              className="absolute inset-0 z-[1000] bg-black/80 backdrop-blur-md flex items-center justify-center p-6"
+              className="fixed inset-0 z-[1000] bg-black/85 backdrop-blur-md flex items-center justify-center p-2 xs:p-4 sm:p-6"
             >
-              <div className="bg-[#0a0a0c] border border-white/10 rounded-2xl max-w-sm w-full p-8 flex flex-col items-center text-center shadow-2xl">
-                <div className="w-16 h-16 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center mb-6">
+              <div className="bg-[#0a0a0c] border border-white/10 rounded-2xl max-w-sm w-full max-h-[92vh] overflow-y-auto custom-scrollbar p-4 sm:p-6 md:p-8 flex flex-col items-center text-center shadow-2xl mx-auto">
+                <div className="w-12 h-12 sm:w-16 sm:h-16 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center mb-4 sm:mb-6 shrink-0">
                   <div className="text-emerald-400">
-                    <svg stroke="currentColor" fill="currentColor" strokeWidth="0" viewBox="0 0 24 24" height="32" width="32" xmlns="http://www.w3.org/2000/svg"><path d="M21 13V11H18.9136C18.4357 8.35405 16.3262 6.24458 13.6803 5.76672C13.2505 3.6186 11.3364 2 9 2C6.23858 2 4 4.23858 4 7V17C4 19.7614 6.23858 22 9 22C11.3364 22 13.2505 20.3814 13.6803 18.2333C16.3262 17.7554 18.4357 15.6459 18.9136 13H21ZM12.0125 10.9786C11.9616 11.6425 11.6703 12.2594 11.1969 12.7328L10 13.9297V17C10 17.5523 9.55228 18 9 18C8.44772 18 8 17.5523 8 17V7C8 6.44772 8.44772 6 9 6C9.55228 6 10 6.44772 10 7V10.0703L11.1969 11.2672C11.6703 11.7406 11.9616 12.3575 12.0125 13.0214H16.8998C16.446 14.8624 14.9392 16.3055 13.0475 16.6808C12.5938 15.228 11.2825 14.159 10.6698 13.565L12.5693 11.6655C13.0381 11.1967 13.3362 10.551 13.4116 9.85191C13.5852 9.578 13.8016 9.33081 14.0537 9.12195L15.3371 10.4054L14.6299 11.1125L15.3371 11.8196L16.7513 10.4054L15.3371 8.99114L14.6299 9.69824L15.3371 10.4054C15.085 10.6143 14.8686 10.8615 14.6949 11.1354H16.8998C16.446 9.29446 14.9392 7.85139 13.0475 7.47607C12.8091 8.23933 12.4566 8.94827 12.0125 9.57143Z"></path></svg>
+                    <svg stroke="currentColor" fill="currentColor" strokeWidth="0" viewBox="0 0 24 24" height="28" width="28" className="sm:w-8 sm:h-8" xmlns="http://www.w3.org/2000/svg"><path d="M21 13V11H18.9136C18.4357 8.35405 16.3262 6.24458 13.6803 5.76672C13.2505 3.6186 11.3364 2 9 2C6.23858 2 4 4.23858 4 7V17C4 19.7614 6.23858 22 9 22C11.3364 22 13.2505 20.3814 13.6803 18.2333C16.3262 17.7554 18.4357 15.6459 18.9136 13H21ZM12.0125 10.9786C11.9616 11.6425 11.6703 12.2594 11.1969 12.7328L10 13.9297V17C10 17.5523 9.55228 18 9 18C8.44772 18 8 17.5523 8 17V7C8 6.44772 8.44772 6 9 6C9.55228 6 10 6.44772 10 7V10.0703L11.1969 11.2672C11.6703 11.7406 11.9616 12.3575 12.0125 13.0214H16.8998C16.446 14.8624 14.9392 16.3055 13.0475 16.6808C12.5938 15.228 11.2825 14.159 10.6698 13.565L12.5693 11.6655C13.0381 11.1967 13.3362 10.551 13.4116 9.85191C13.5852 9.578 13.8016 9.33081 14.0537 9.12195L15.3371 10.4054L14.6299 11.1125L15.3371 11.8196L16.7513 10.4054L15.3371 8.99114L14.6299 9.69824L15.3371 10.4054C15.085 10.6143 14.8686 10.8615 14.6949 11.1354H16.8998C16.446 9.29446 14.9392 7.85139 13.0475 7.47607C12.8091 8.23933 12.4566 8.94827 12.0125 9.57143Z"></path></svg>
                   </div>
                 </div>
-                <h2 className="text-xl font-bold text-white mb-2">Access Required</h2>
-                <p className="text-sm text-zinc-400 leading-relaxed mb-8">
+                <h2 className="text-lg sm:text-xl font-bold text-white mb-1 sm:mb-2 leading-tight">Access Required</h2>
+                <p className="text-xs sm:text-sm text-zinc-400 leading-relaxed mb-4 sm:mb-6">
                   Request camera and microphone access to enable voice-first interactions and real-time analysis.
                 </p>
+                {window.self !== window.top && (
+                  <div className="mb-4 sm:mb-6 w-full p-2.5 sm:p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-300 text-[10px] sm:text-xs text-left leading-normal sm:leading-relaxed">
+                    <span className="font-bold block mb-1 text-amber-400">⚠️ Sandbox Environment Active</span>
+                    Browsers block microphone/camera access in nested previews. Click <strong className="text-white font-semibold">"Open in New Tab"</strong> (top-right of preview pane) to launch IRIS in a dedicated window, or click SKIP.
+                  </div>
+                )}
                 {permissionDeniedReason && (
-                  <div className="mb-6 w-full p-4 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 text-xs text-left">
-                    <div className="font-bold mb-1 flex items-center gap-1.5">
-                      <RiErrorWarningLine size={16} /> Permission Denied
+                  <div className="mb-4 sm:mb-6 w-full p-3 sm:p-4 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 text-[10px] sm:text-xs text-left leading-normal sm:leading-relaxed">
+                    <div className="font-bold mb-1 flex items-center gap-1.5 text-xs sm:text-sm">
+                      <RiErrorWarningLine size={14} className="sm:w-4 sm:h-4" /> Permission Denied
                     </div>
                     {permissionDeniedReason}
                   </div>
                 )}
-                <div className="w-full flex gap-3">
+                <div className="w-full flex flex-col xs:flex-row gap-2 sm:gap-3 mt-auto shrink-0">
                   <button 
                     onClick={() => setShowPermissionsModal(false)}
-                    className="flex-1 py-3 px-4 rounded-xl text-xs font-bold tracking-widest text-zinc-400 bg-white/5 hover:bg-white/10 hover:text-white transition-colors"
+                    className="flex-1 py-2.5 sm:py-3 px-3 sm:px-4 rounded-xl text-[10px] sm:text-xs font-bold tracking-widest text-zinc-400 bg-white/5 hover:bg-white/10 hover:text-white transition-colors uppercase"
                   >
                     SKIP
                   </button>
                   <button 
                     onClick={requestPermissions}
-                    className="flex-1 py-3 px-4 rounded-xl text-xs font-bold tracking-widest text-black bg-emerald-500 hover:bg-emerald-400 hover:shadow-[0_0_20px_rgba(16,185,129,0.3)] transition-all"
+                    className="flex-1 py-2.5 sm:py-3 px-3 sm:px-4 rounded-xl text-[10px] sm:text-xs font-bold tracking-widest text-black bg-emerald-500 hover:bg-emerald-400 hover:shadow-[0_0_20px_rgba(16,185,129,0.3)] transition-all uppercase"
                   >
                     GRANT ACCESS
                   </button>

@@ -1,8 +1,9 @@
 import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { RiAddLine, RiDeleteBinLine, RiTimeLine, RiNotification3Line, RiCalendarEventLine, RiImageAddLine, RiCloseLine } from 'react-icons/ri';
+import { Plus, Trash2, Clock, Bell, Calendar, ImagePlus, X, Pencil, CheckCircle2, Circle, Check } from 'lucide-react';
 import { useNotificationStore } from '../store/notificationStore';
 import { playNotification } from '../utils/audio';
+import TaskItem from '../components/TaskItem';
 
 interface Task {
   id: string;
@@ -14,6 +15,7 @@ interface Task {
   completed: boolean;
   createdAt: number;
   notified?: boolean;
+  dueNotified?: boolean;
   imageUrl?: string;
 }
 
@@ -28,6 +30,7 @@ export default function TasksView() {
   const [reminderTime, setReminderTime] = useState('');
   const [priority, setPriority] = useState<'Low' | 'Medium' | 'High'>('Medium');
   const [imageAttachment, setImageAttachment] = useState<string | null>(null);
+  const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -59,7 +62,7 @@ export default function TasksView() {
 
   const addNotification = useNotificationStore(state => state.addNotification);
 
-  // Check for due reminders
+  // Check for due reminders and due dates
   useEffect(() => {
     // Request notification permission if not already done
     if ("Notification" in window && Notification.permission !== "denied" && Notification.permission !== "granted") {
@@ -71,29 +74,55 @@ export default function TasksView() {
       setTasks(prevTasks => {
         let updated = false;
         const nextTasks = prevTasks.map(task => {
-          if (!task.completed && task.reminderTime && !task.notified) {
-            const reminderMs = new Date(task.reminderTime).getTime();
+          let modifiedTask = { ...task };
+          
+          if (!modifiedTask.completed && modifiedTask.reminderTime && !modifiedTask.notified) {
+            const reminderMs = new Date(modifiedTask.reminderTime).getTime();
             if (now >= reminderMs) {
               updated = true;
               addNotification({
-                title: `Task Reminder: ${task.priority}`,
-                message: task.title,
+                title: `Task Reminder: ${modifiedTask.priority}`,
+                message: modifiedTask.title,
                 type: 'info'
               });
               
               // Trigger browser Native notification
               if ("Notification" in window && Notification.permission === "granted") {
-                new Notification(`Task Reminder: ${task.title}`, {
-                  body: task.description || `Priority: ${task.priority}`,
+                new Notification(`Task Reminder: ${modifiedTask.title}`, {
+                  body: modifiedTask.description || `Priority: ${modifiedTask.priority}`,
                   icon: '/favicon.ico'
                 });
               }
 
               playNotification();
-              return { ...task, notified: true };
+              modifiedTask.notified = true;
             }
           }
-          return task;
+
+          if (!modifiedTask.completed && modifiedTask.dueDate && !modifiedTask.dueNotified) {
+            const dueMs = new Date(modifiedTask.dueDate).getTime();
+            if (now >= dueMs) {
+              updated = true;
+              addNotification({
+                title: `Task Due: ${modifiedTask.priority}`,
+                message: modifiedTask.title,
+                type: 'warning'
+              });
+              
+              // Trigger browser Native notification
+              if ("Notification" in window && Notification.permission === "granted") {
+                new Notification(`Task Due: ${modifiedTask.title}`, {
+                  body: modifiedTask.description || `Priority: ${modifiedTask.priority}`,
+                  icon: '/favicon.ico'
+                });
+              }
+
+              playNotification();
+              modifiedTask.dueNotified = true;
+            }
+          }
+
+          return modifiedTask;
         });
         return updated ? nextTasks : prevTasks;
       });
@@ -102,7 +131,8 @@ export default function TasksView() {
     return () => clearInterval(interval);
   }, [addNotification]);
 
-  const [taskToDelete, setTaskToDelete] = useState<string | null>(null);
+  const [tasksToDelete, setTasksToDelete] = useState<string[] | null>(null);
+  const [selectedTaskIds, setSelectedTaskIds] = useState<Set<string>>(new Set());
   const [sortBy, setSortBy] = useState<'dueDate' | 'priority' | 'createdAt'>('createdAt');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
   const [filterStatus, setFilterStatus] = useState<'ALL' | 'ACTIVE' | 'COMPLETED'>('ALL');
@@ -142,18 +172,33 @@ export default function TasksView() {
 
   const handleAddTask = () => {
     if (!title.trim()) return;
-    const newTask: Task = {
-      id: Math.random().toString(36).substring(7),
-      title,
-      description,
-      dueDate,
-      reminderTime: reminderTime || undefined,
-      priority,
-      completed: false,
-      createdAt: Date.now(),
-      imageUrl: imageAttachment || undefined,
-    };
-    setTasks(prev => [...prev, newTask]);
+
+    if (editingTaskId) {
+      setTasks(prev => prev.map(t => t.id === editingTaskId ? {
+        ...t,
+        title,
+        description,
+        dueDate,
+        reminderTime: reminderTime || undefined,
+        priority,
+        imageUrl: imageAttachment || undefined,
+      } : t));
+      setEditingTaskId(null);
+    } else {
+      const newTask: Task = {
+        id: Math.random().toString(36).substring(7),
+        title,
+        description,
+        dueDate,
+        reminderTime: reminderTime || undefined,
+        priority,
+        completed: false,
+        createdAt: Date.now(),
+        imageUrl: imageAttachment || undefined,
+      };
+      setTasks(prev => [...prev, newTask]);
+    }
+
     setTitle('');
     setDescription('');
     setDueDate('');
@@ -163,13 +208,71 @@ export default function TasksView() {
     localStorage.removeItem('iris_task_draft');
   };
 
-  const toggleTaskCompletion = (task: Task) => {
-    setTasks(prev => prev.map(t => t.id === task.id ? { ...t, completed: !t.completed } : t));
+  const handleEditTask = (task: Task) => {
+    setEditingTaskId(task.id);
+    setTitle(task.title);
+    setDescription(task.description);
+    setDueDate(task.dueDate || '');
+    setReminderTime(task.reminderTime || '');
+    setPriority(task.priority);
+    setImageAttachment(task.imageUrl || null);
   };
 
-  const confirmDelete = (id: string) => {
-    setTasks(prev => prev.filter(t => t.id !== id));
-    setTaskToDelete(null);
+  const toggleTaskCompletion = (task: Task) => {
+    const isNowCompleted = !task.completed;
+    setTasks(prev => prev.map(t => t.id === task.id ? { ...t, completed: isNowCompleted } : t));
+    
+    addNotification({
+      title: isNowCompleted ? 'Task Completed' : 'Task Active',
+      message: `"${task.title}" has been marked as ${isNowCompleted ? 'complete' : 'active'}.`,
+      type: isNowCompleted ? 'success' : 'info',
+      action: {
+        label: 'Undo',
+        onClick: () => setTasks(prev => prev.map(t => t.id === task.id ? { ...t, completed: !isNowCompleted } : t))
+      }
+    });
+  };
+
+  const confirmDelete = (ids: string[]) => {
+    const tasksToRemove = tasks.filter(t => ids.includes(t.id));
+    setTasks(prev => prev.filter(t => !ids.includes(t.id)));
+    setTasksToDelete(null);
+    setSelectedTaskIds(new Set());
+    
+    addNotification({
+      title: ids.length > 1 ? 'Tasks Deleted' : 'Task Deleted',
+      message: `${ids.length} task${ids.length > 1 ? 's' : ''} deleted.`,
+      type: 'info',
+      action: {
+        label: 'Undo',
+        onClick: () => setTasks(prev => [...prev, ...tasksToRemove])
+      }
+    });
+  };
+
+  const handleSelectTask = (id: string, selected: boolean) => {
+    setSelectedTaskIds(prev => {
+      const next = new Set(prev);
+      if (selected) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  };
+
+  const handleBulkComplete = () => {
+    const idsToComplete = Array.from(selectedTaskIds);
+    setTasks(prev => prev.map(t => idsToComplete.includes(t.id) ? { ...t, completed: true } : t));
+    setSelectedTaskIds(new Set());
+    
+    addNotification({
+      title: 'Tasks Completed',
+      message: `${idsToComplete.length} tasks marked as complete.`,
+      type: 'success',
+      action: {
+        label: 'Undo',
+        onClick: () => setTasks(prev => prev.map(t => idsToComplete.includes(t.id) ? { ...t, completed: false } : t))
+      }
+    });
   };
 
   const filteredTasks = tasks.filter(task => {
@@ -197,7 +300,7 @@ export default function TasksView() {
   return (
     <div className="flex h-full bg-[#111111] p-6 gap-6 font-sans text-white relative">
       <AnimatePresence>
-        {taskToDelete && (
+        {tasksToDelete && (
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -210,20 +313,20 @@ export default function TasksView() {
               exit={{ scale: 0.95, opacity: 0 }}
               className="bg-zinc-900 border border-white/10 p-6 rounded-2xl shadow-2xl max-w-sm w-full"
             >
-              <h3 className="text-xl font-bold text-white mb-2">Delete Task</h3>
-              <p className="text-zinc-400 mb-6 text-sm leading-relaxed">Are you sure you want to permanently delete this task? This action cannot be undone.</p>
+              <h3 className="text-xl font-bold text-white mb-2">Delete {tasksToDelete.length > 1 ? 'Tasks' : 'Task'}</h3>
+              <p className="text-zinc-400 mb-6 text-sm leading-relaxed">Are you sure you want to permanently delete {tasksToDelete.length > 1 ? `these ${tasksToDelete.length} tasks` : 'this task'}? This action cannot be undone.</p>
               <div className="flex gap-3">
                 <button
-                  onClick={() => confirmDelete(taskToDelete)}
+                  onClick={() => confirmDelete(tasksToDelete)}
                   className="flex-1 bg-red-500 hover:bg-red-600 text-white font-bold py-2.5 rounded-lg transition-colors text-sm"
-                  aria-label="Confirm deletion of task"
+                  aria-label="Confirm deletion"
                 >
                   Delete
                 </button>
                 <button
-                  onClick={() => setTaskToDelete(null)}
+                  onClick={() => setTasksToDelete(null)}
                   className="flex-1 bg-zinc-800 hover:bg-zinc-700 text-white font-bold py-2.5 rounded-lg transition-colors text-sm"
-                  aria-label="Cancel deletion of task"
+                  aria-label="Cancel deletion"
                 >
                   Cancel
                 </button>
@@ -234,7 +337,25 @@ export default function TasksView() {
       </AnimatePresence>
 
       <div className="w-1/3 flex flex-col gap-4 border-r border-white/10 pr-6">
-        <h2 className="text-xl font-bold tracking-widest">NEW TASK</h2>
+        <div className="flex justify-between items-center">
+          <h2 className="text-xl font-bold tracking-widest uppercase">{editingTaskId ? 'Edit Task' : 'New Task'}</h2>
+          {editingTaskId && (
+            <button
+              onClick={() => {
+                setEditingTaskId(null);
+                setTitle('');
+                setDescription('');
+                setDueDate('');
+                setReminderTime('');
+                setPriority('Medium');
+                setImageAttachment(null);
+              }}
+              className="text-[10px] text-zinc-500 hover:text-white uppercase tracking-wider font-semibold bg-zinc-800 px-2 py-1 rounded"
+            >
+              Cancel
+            </button>
+          )}
+        </div>
         <input
           type="text"
           placeholder="Task Title"
@@ -289,16 +410,16 @@ export default function TasksView() {
               className="absolute top-2 right-2 bg-black/50 hover:bg-red-500 text-white p-1.5 rounded-full transition-colors opacity-0 group-hover:opacity-100"
               aria-label="Remove image attachment"
             >
-              <RiCloseLine size={16} />
+              <X size={16} />
             </button>
           </div>
         ) : (
-          <button
+            <button
             onClick={() => fileInputRef.current?.click()}
             className="bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 rounded-lg p-3 text-sm text-zinc-400 transition-colors flex items-center justify-center gap-2 border-dashed"
             aria-label="Attach an image to the task"
           >
-            <RiImageAddLine size={18} /> Attach Image
+            <ImagePlus size={18} /> Attach Image
           </button>
         )}
         <input 
@@ -313,10 +434,10 @@ export default function TasksView() {
 
         <button
           onClick={handleAddTask}
-          className="bg-emerald-500 hover:bg-emerald-600 text-black font-bold py-3 rounded-lg transition-colors flex items-center justify-center gap-2 mt-2"
-          aria-label="Add new task"
+          className={`${editingTaskId ? 'bg-blue-500 hover:bg-blue-600' : 'bg-emerald-500 hover:bg-emerald-600'} text-black font-bold py-3 rounded-lg transition-colors flex items-center justify-center gap-2 mt-2`}
+          aria-label={editingTaskId ? "Save task changes" : "Add new task"}
         >
-          <RiAddLine /> Add Task
+          {editingTaskId ? <Check size={20} /> : <Plus size={20} />} {editingTaskId ? 'Save Changes' : 'Add Task'}
         </button>
       </div>
 
@@ -324,6 +445,39 @@ export default function TasksView() {
         <div className="flex justify-between items-center mb-6">
           <h2 className="text-xl font-bold tracking-widest">TASKS</h2>
           <div className="flex gap-2 items-center flex-wrap justify-end">
+            <AnimatePresence>
+              {selectedTaskIds.size > 0 && (
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.9, x: 20 }}
+                  animate={{ opacity: 1, scale: 1, x: 0 }}
+                  exit={{ opacity: 0, scale: 0.9, x: 20 }}
+                  className="flex items-center gap-2 bg-emerald-500/10 border border-emerald-500/20 rounded-lg p-1 mr-2 px-3"
+                >
+                  <span className="text-xs font-bold text-emerald-400 mr-2">{selectedTaskIds.size} Selected</span>
+                  <button
+                    onClick={handleBulkComplete}
+                    className="p-1.5 hover:bg-emerald-500/20 text-emerald-400 rounded-md transition-colors"
+                    title="Mark Selected as Complete"
+                  >
+                    <CheckCircle2 size={16} />
+                  </button>
+                  <button
+                    onClick={() => setTasksToDelete(Array.from(selectedTaskIds))}
+                    className="p-1.5 hover:bg-red-500/20 text-red-400 rounded-md transition-colors"
+                    title="Delete Selected"
+                  >
+                    <Trash2 size={16} />
+                  </button>
+                  <button
+                    onClick={() => setSelectedTaskIds(new Set())}
+                    className="p-1.5 hover:bg-zinc-800 text-zinc-400 rounded-md transition-colors ml-1 border-l border-white/10 pl-2"
+                    title="Clear Selection"
+                  >
+                    <X size={16} />
+                  </button>
+                </motion.div>
+              )}
+            </AnimatePresence>
             <select
               value={filterStatus}
               aria-label="Filter tasks by status"
@@ -396,111 +550,15 @@ export default function TasksView() {
           ) : (
             <AnimatePresence>
               {sortedTasks.map(task => (
-                <motion.div 
-                  key={task.id} 
-                  layout
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ 
-                    opacity: task.completed ? 0.6 : 1, 
-                    y: 0, 
-                    scale: task.completed ? 0.98 : 1,
-                    backgroundColor: task.completed ? 'rgba(24, 24, 27, 0.5)' : 'rgba(24, 24, 27, 1)'
-                  }}
-                  exit={{ opacity: 0, scale: 0.9 }}
-                   transition={{ duration: 0.3, ease: "easeOut" }}
-                  className={`p-4 rounded-xl border flex items-center gap-4 transition-colors card-hover ${
-                    task.completed ? 'border-zinc-800' : 'border-zinc-700'
-                  }`}
-                >
-                  <motion.button 
-                    whileTap={{ scale: 0.8 }}
-                    onClick={() => toggleTaskCompletion(task)}
-                    aria-label={`Mark task "${task.title}" as ${task.completed ? 'incomplete' : 'complete'}`}
-                    className={`w-6 h-6 rounded-full border flex items-center justify-center shrink-0 transition-colors relative overflow-hidden ${
-                      task.completed ? 'bg-emerald-500 border-emerald-500 text-black' : 'border-zinc-500 hover:border-emerald-500'
-                    }`}
-                  >
-                    {task.completed && (
-                      <motion.div
-                        initial={{ scale: 0, opacity: 0 }}
-                        animate={{ scale: 2, opacity: 0 }}
-                        transition={{ duration: 0.5, ease: "easeOut" }}
-                        className="absolute inset-0 bg-white rounded-full"
-                      />
-                    )}
-                    <AnimatePresence>
-                      {task.completed && (
-                        <motion.svg
-                          xmlns="http://www.w3.org/2000/svg"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="3"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          className="w-3 h-3 text-black"
-                          initial={{ pathLength: 0, opacity: 0 }}
-                          animate={{ pathLength: 1, opacity: 1 }}
-                          exit={{ opacity: 0, scale: 0 }}
-                          transition={{ duration: 0.3, ease: "easeOut" }}
-                        >
-                          <motion.path
-                            d="M20 6L9 17l-5-5"
-                            initial={{ pathLength: 0 }}
-                            animate={{ pathLength: 1 }}
-                            transition={{ duration: 0.4, ease: "easeOut", delay: 0.1 }}
-                          />
-                        </motion.svg>
-                      )}
-                    </AnimatePresence>
-                  </motion.button>
-
-                  <div className="flex-1 overflow-hidden">
-                    <div className="flex items-center gap-2">
-                      <h3 className={`font-bold truncate transition-all ${task.completed ? 'line-through text-zinc-500' : 'text-zinc-200'}`}>
-                        {task.title}
-                      </h3>
-                      {!task.completed && task.dueDate && new Date(task.dueDate).getTime() < Date.now() && (
-                        <span className="text-[9px] font-bold bg-red-500/20 text-red-500 px-1.5 py-0.5 rounded uppercase tracking-wider">
-                          Overdue
-                        </span>
-                      )}
-                    </div>
-                    {task.description && <p className="text-xs text-zinc-400 truncate mt-1">{task.description}</p>}
-                    {task.imageUrl && (
-                      <div className="mt-2 w-20 h-20 rounded-lg overflow-hidden border border-white/10">
-                        <img src={task.imageUrl} alt="Task attachment" className="w-full h-full object-cover" />
-                      </div>
-                    )}
-                    <div className="flex items-center gap-3 mt-2 text-[10px] font-mono">
-                      {task.dueDate && (
-                        <span className={`flex items-center gap-1 ${!task.completed && new Date(task.dueDate).getTime() < Date.now() ? 'text-red-400' : 'text-blue-400'}`}>
-                          <RiTimeLine /> Due: {new Date(task.dueDate).toLocaleString()}
-                        </span>
-                      )}
-                      {task.reminderTime && (
-                        <span className="flex items-center gap-1 text-purple-400">
-                          <RiNotification3Line /> Reminder: {new Date(task.reminderTime).toLocaleString()}
-                        </span>
-                      )}
-                      <span className={`px-2 py-0.5 rounded-full ${
-                        task.priority === 'High' ? 'bg-red-500/20 text-red-400' : 
-                        task.priority === 'Medium' ? 'bg-yellow-500/20 text-yellow-400' : 
-                        'bg-blue-500/20 text-blue-400'
-                      }`}>
-                        {task.priority}
-                      </span>
-                    </div>
-                  </div>
-
-                  <button 
-                    onClick={() => setTaskToDelete(task.id)}
-                    className="p-2 text-red-500 hover:bg-red-500/20 rounded-lg transition-colors"
-                    aria-label={`Delete task "${task.title}"`}
-                  >
-                    <RiDeleteBinLine />
-                  </button>
-                </motion.div>
+                <TaskItem
+                  key={task.id}
+                  task={task}
+                  onToggleComplete={toggleTaskCompletion}
+                  onEdit={handleEditTask}
+                  onDelete={(id) => setTasksToDelete([id])}
+                  isSelected={selectedTaskIds.has(task.id)}
+                  onSelect={handleSelectTask}
+                />
               ))}
             </AnimatePresence>
           )}

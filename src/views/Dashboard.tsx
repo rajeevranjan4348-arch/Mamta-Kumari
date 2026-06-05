@@ -98,9 +98,27 @@ export default function DashboardView({
   const [quality, setQuality] = useState({ width: 1280, height: 720, frameRate: 60 })
   const [isAnalyzing, setIsAnalyzing] = useState(false)
   const [currentTime, setCurrentTime] = useState(new Date())
+  const [isChatExpanded, setIsChatExpanded] = useState(false)
   const [battery, setBattery] = useState<{ level: number, charging: boolean } | null>(null)
   const [network, setNetwork] = useState<{ online: boolean, type?: string }>({ online: navigator.onLine })
-  const [weather, setWeather] = useState<{ temp: string, desc: string } | null>(null)
+  const [weather, setWeather] = useState<{ temp: string, desc: string, location?: string } | null>(null)
+  const [fullWeather, setFullWeather] = useState<any | null>(null)
+
+  useEffect(() => {
+    const handleWeather = (e: any) => {
+      const data = e.detail.data;
+      setFullWeather(data);
+      if (data && data.current_condition) {
+        setWeather({
+          temp: data.current_condition[0].temp_C,
+          desc: data.current_condition[0].weatherDesc[0].value,
+          location: e.detail.location
+        })
+      }
+    }
+    window.addEventListener('show-weather', handleWeather)
+    return () => window.removeEventListener('show-weather', handleWeather)
+  }, [])
 
   useEffect(() => {
     if ('getBattery' in navigator) {
@@ -125,22 +143,24 @@ export default function DashboardView({
   }, [])
 
   useEffect(() => {
-    if (isSystemActive) {
+    if (isSystemActive && !fullWeather) {
       navigator.geolocation.getCurrentPosition(
         pos => {
           fetch(`https://wttr.in/${pos.coords.latitude},${pos.coords.longitude}?format=j1`)
             .then(res => res.json())
             .then(data => {
+              setFullWeather(data)
               setWeather({
                  temp: data.current_condition[0].temp_C,
-                 desc: data.current_condition[0].weatherDesc[0].value
+                 desc: data.current_condition[0].weatherDesc[0].value,
+                 location: 'Local'
               })
             }).catch(() => {})
         },
         () => {}
       )
     }
-  }, [isSystemActive])
+  }, [isSystemActive, fullWeather])
 
   useEffect(() => {
     const timer = setInterval(() => setCurrentTime(new Date()), 1000)
@@ -148,8 +168,10 @@ export default function DashboardView({
   }, [])
 
   useEffect(() => {
-    if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight
-  }, [chatHistory])
+    if (isChatExpanded && scrollRef.current) {
+      scrollRef.current.scrollIntoView({ behavior: 'smooth' })
+    }
+  }, [chatHistory, isChatExpanded])
 
   useEffect(() => {
     const handleCloseMods = () => setIsPopupOpen(false)
@@ -278,6 +300,31 @@ export default function DashboardView({
               {currentTime.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric'})}
             </div>
           </div>
+
+          {(weather || fullWeather) && (
+            <div className={`p-3 rounded-xl border backdrop-blur-md bg-zinc-900/40 border-white/10 card-hover flex flex-col`}>
+              <div className="text-[10px] font-bold tracking-widest text-zinc-500 mb-1 border-b border-white/10 pb-1 flex justify-between">
+                <span>WEATHER {weather?.location && `(${weather.location.toUpperCase()})`}</span>
+              </div>
+              {weather && (
+                <div className="flex justify-between items-end mt-1">
+                  <div className="text-2xl font-black text-white font-mono">{weather.temp}°C</div>
+                  <div className="text-[10px] text-emerald-400 font-bold uppercase w-20 text-right leading-tight">
+                    {weather.desc}
+                  </div>
+                </div>
+              )}
+              {fullWeather && fullWeather.weather && fullWeather.weather.slice(1, 3).map((day: any, i: number) => (
+                <div key={i} className="flex justify-between items-center mt-2 pt-1 border-t border-white/5 text-[10px]">
+                  <span className="text-zinc-400 font-mono">{new Date(day.date).toLocaleDateString('en-US', { weekday: 'short' }).toUpperCase()}</span>
+                  <div className="flex gap-2 font-mono">
+                    <span className="text-zinc-500">L:{day.mintempC}°</span>
+                    <span className="text-white">H:{day.maxtempC}°</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
 
           <div className={`p-4 rounded-xl border backdrop-blur-md card-hover ${isSystemActive ? 'bg-indigo-950/20 border-indigo-500/20 shadow-[0_0_15px_rgba(99,102,241,0.1)]' : 'bg-zinc-900/40 border-white/10'}`}>
             <div className="text-[10px] font-bold tracking-widest text-zinc-500 mb-4 border-b border-white/10 pb-2">LOCAL ENVIRONMENT & HEALTH</div>
@@ -568,17 +615,52 @@ export default function DashboardView({
 
         {/* Text Overlay for Live Conversation */}
         {isSystemActive && chatHistory.length > 0 && (
-          <div className="absolute bottom-32 w-full flex justify-center z-40 px-4 pointer-events-none">
-            <div className="max-w-2xl w-full bg-black/60 backdrop-blur-md border border-white/10 rounded-2xl p-4 text-center shadow-2xl">
-              <p className="text-lg md:text-xl font-medium text-white drop-shadow-md">
-                <TypingText 
-                  text={chatHistory[chatHistory.length - 1].content} 
-                  isLatest={true} 
-                />
-              </p>
-              <p className="text-[10px] uppercase tracking-widest text-emerald-400 mt-2 opacity-80">
-                {chatHistory[chatHistory.length - 1].role === 'user' ? 'YOU' : 'IRIS'}
-              </p>
+          <div className={`absolute w-full flex justify-center z-40 px-4 transition-all duration-300 ${isChatExpanded ? 'bottom-32 top-32' : 'bottom-32'}`}>
+            <div 
+              className={`max-w-2xl w-full bg-black/60 backdrop-blur-md border border-white/10 shadow-2xl transition-all duration-300 flex flex-col cursor-pointer ${isChatExpanded ? 'h-full rounded-3xl p-6 pointer-events-auto' : 'rounded-2xl p-4 text-center pointer-events-auto hover:bg-black/70'}`}
+              onClick={() => !isChatExpanded && setIsChatExpanded(true)}
+            >
+              {!isChatExpanded ? (
+                <>
+                  <p className="text-lg md:text-xl font-medium text-white drop-shadow-md">
+                    <TypingText 
+                      text={chatHistory[chatHistory.length - 1].content} 
+                      isLatest={true} 
+                    />
+                  </p>
+                  <p className="text-[10px] uppercase tracking-widest text-emerald-400 mt-2 opacity-80 flex items-center justify-center gap-2">
+                    {chatHistory[chatHistory.length - 1].role === 'user' ? 'YOU' : 'IRIS'}
+                    <RiArrowUpLine size={12} className="animate-bounce" />
+                  </p>
+                </>
+              ) : (
+                <>
+                  <div className="flex items-center justify-between mb-4 pb-4 border-b border-white/10 shrink-0">
+                    <h3 className="text-sm font-semibold text-emerald-400 flex items-center gap-2">
+                      <RiHistoryLine size={16} /> Live Transcript
+                    </h3>
+                    <button 
+                      onClick={(e) => { e.stopPropagation(); setIsChatExpanded(false); }}
+                      className="p-1.5 rounded-full hover:bg-white/10 text-zinc-400 hover:text-white transition-colors"
+                    >
+                      <RiCloseLine size={18} />
+                    </button>
+                  </div>
+                  <div className="flex-1 overflow-y-auto custom-scrollbar pr-2 flex flex-col gap-4">
+                    {chatHistory.map((msg, i) => (
+                      <div key={i} className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
+                        <div className={`max-w-[85%] rounded-2xl px-4 py-2 ${msg.role === 'user' ? 'bg-emerald-500/20 text-emerald-100 border border-emerald-500/20' : 'bg-zinc-800/50 text-zinc-200 border border-white/5'}`}>
+                          <p className="text-sm md:text-base leading-relaxed">{msg.content}</p>
+                        </div>
+                        <span className="text-[10px] uppercase tracking-widest text-zinc-500 mt-1 px-1">
+                          {msg.role === 'user' ? 'YOU' : 'IRIS'}
+                        </span>
+                      </div>
+                    ))}
+                    <div ref={scrollRef} />
+                  </div>
+                </>
+              )}
             </div>
           </div>
         )}

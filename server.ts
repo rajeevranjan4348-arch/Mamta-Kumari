@@ -1,4 +1,5 @@
 import express from 'express';
+import path from 'path';
 import { createServer as createViteServer } from 'vite';
 import { WebSocketServer, WebSocket } from 'ws';
 import http from 'http';
@@ -355,7 +356,6 @@ Strict Rule: Kabhi bhi ye mat kaho ki 'Main ek AI hoon aur dekh nahi sakta'. Tum
     });
     app.use(vite.middlewares);
   } else {
-    const path = await import('path');
     const distPath = path.join(process.cwd(), 'dist');
     app.use(express.static(distPath));
     app.get('*', (req, res) => {

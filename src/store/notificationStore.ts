@@ -2,6 +2,11 @@ import { create } from 'zustand';
 
 export type NotificationType = 'info' | 'success' | 'warning' | 'error';
 
+export interface NotificationAction {
+  label: string;
+  onClick: () => void;
+}
+
 export interface Notification {
   id: string;
   title: string;
@@ -9,6 +14,7 @@ export interface Notification {
   type: NotificationType;
   read: boolean;
   createdAt: number;
+  action?: NotificationAction;
 }
 
 interface NotificationStore {

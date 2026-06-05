@@ -13,10 +13,10 @@ export class GeminiLiveService {
   private latestMimeType: string = 'image/jpeg';
   
   public onTranscript?: (role: string, text: string) => void;
-  public onCommand?: (command: string, args: any) => void;
+  public onCommand?: (command: string, args: any) => Promise<any> | any;
 
   private ai: GoogleGenAI | null = null;
-  private session: any = null;
+  private session: WebSocket | null = null;
 
   get hasMicrophone(): boolean {
     return this.mediaStream !== null;
@@ -66,7 +66,7 @@ export class GeminiLiveService {
     const viteKey = (import.meta && import.meta.env) ? import.meta.env.VITE_GEMINI_API_KEY : '';
     const apiKey = localStorage.getItem('iris_custom_api_key') || viteKey || systemApiKey;
     
-    this.ai = new GoogleGenAI({ apiKey });
+    const wsUrl = `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent?key=${apiKey}`;
 
     // Dynamic prompt and settings
     const personality = localStorage.getItem('iris_personality') || "Be helpful, technical, with a 'bro-vibe'. Speak Hindi and English.";
@@ -75,49 +75,75 @@ export class GeminiLiveService {
     
     const fullSystemPrompt = `${IRIS_SYSTEM_PROMPT}\n\nYou are talking to ${userName}.\nPersonality: ${personality}\nThe current time is ${currentTime}.`;
 
-    try {
-      this.session = await this.ai.live.connect({
-        model: `models/gemini-3.1-flash-live-preview`,
-        config: {
-          responseModalities: [Modality.AUDIO],
-          systemInstruction: fullSystemPrompt,
-          speechConfig: {
-            voiceConfig: { prebuiltVoiceConfig: { voiceName: localStorage.getItem('iris_ai_voice') || 'Puck' } },
-          },
-          tools: [{
-            googleSearch: {}
-          }, {
-            functionDeclarations: [
-               { name: "analyzeCameraFeed", description: "Call this tool WHENEVER the user asks you to look at the camera..." },
-               { name: "clearHistory", description: "Clears the user's chat history, transcript, or memory." },
-               { name: "openDashboard", description: "Opens the main dashboard, home screen, or main menu view." },
-               { name: "openSettings", description: "Opens the settings, configuration, or command center view." },
-               { name: "adjustVolume", description: "Adjusts the system volume.", parameters: { type: Type.OBJECT, properties: { level: { type: Type.NUMBER } }, required: ["level"] } },
-               { name: "changeBrightness", description: "Changes the display brightness.", parameters: { type: Type.OBJECT, properties: { level: { type: Type.NUMBER } }, required: ["level"] } },
-               { name: "openUrl", description: "Opens a specific URL or website in the browser.", parameters: { type: Type.OBJECT, properties: { url: { type: Type.STRING } }, required: ["url"] } },
-               { name: "getWeather", description: "Gets the current weather for a specific location.", parameters: { type: Type.OBJECT, properties: { location: { type: Type.STRING } }, required: ["location"] } },
-               { name: "androidPerformAction", description: "Perform an Android system action via ADB.", parameters: { type: Type.OBJECT, properties: { action: { type: Type.STRING } }, required: ["action"] } },
-               { name: "startCamera", description: "Starts the camera feed for vision analysis." },
-               { name: "startScreenShare", description: "Starts screen sharing for vision analysis." }
-            ]
-          }]
-        },
-        callbacks: {
-          onopen: () => {
-            this.isConnected = true;
-            this.setupAudioProcessing();
-          },
-          onmessage: (msg: any) => this.handleMessage(msg),
-          onerror: (e: any) => console.error('Live API error', e),
-          onclose: () => {
-            this.isConnected = false;
-            console.log('Session closed');
-          },
-        },
-      });
-    } catch (err) {
-      console.error("Failed to connect to Live API", err);
-    }
+    return new Promise((resolve, reject) => {
+      this.session = new WebSocket(wsUrl);
+      
+      this.session.onopen = () => {
+        const setupMessage = {
+          setup: {
+            model: "models/gemini-3.1-flash-live-preview",
+            systemInstruction: {
+              parts: [{ text: fullSystemPrompt }]
+            },
+            tools: [{
+              googleSearch: {}
+            }, {
+              functionDeclarations: [
+                { name: "analyzeCameraFeed", description: "Call this tool WHENEVER the user asks you to look at the camera..." },
+                { name: "clearHistory", description: "Clears the user's chat history, transcript, or memory." },
+                { name: "openDashboard", description: "Opens the main dashboard, home screen, or main menu view." },
+                { name: "openSettings", description: "Opens the settings, configuration, or command center view." },
+                { name: "adjustVolume", description: "Adjusts the system volume.", parameters: { type: Type.OBJECT, properties: { level: { type: Type.NUMBER } }, required: ["level"] } },
+                { name: "changeBrightness", description: "Changes the display brightness.", parameters: { type: Type.OBJECT, properties: { level: { type: Type.NUMBER } }, required: ["level"] } },
+                { name: "openUrl", description: "Opens a specific URL or website in the browser.", parameters: { type: Type.OBJECT, properties: { url: { type: Type.STRING } }, required: ["url"] } },
+                { name: "getWeather", description: "Gets the current weather for a specific location.", parameters: { type: Type.OBJECT, properties: { location: { type: Type.STRING } }, required: ["location"] } },
+                { name: "androidPerformAction", description: "Perform an Android system action via ADB.", parameters: { type: Type.OBJECT, properties: { action: { type: Type.STRING } }, required: ["action"] } },
+                { name: "startCamera", description: "Starts the camera feed for vision analysis." },
+                { name: "startScreenShare", description: "Starts screen sharing for vision analysis." }
+              ]
+            }],
+            generationConfig: {
+              responseModalities: ["AUDIO"],
+              speechConfig: {
+                voiceConfig: { prebuiltVoiceConfig: { voiceName: localStorage.getItem('iris_ai_voice') || 'Puck' } }
+              }
+            }
+          }
+        };
+
+        this.session?.send(JSON.stringify(setupMessage));
+        this.isConnected = true;
+        this.setupAudioProcessing();
+        resolve();
+      };
+
+      this.session.onmessage = (event: MessageEvent) => {
+        try {
+          if (event.data instanceof Blob) {
+            const reader = new FileReader();
+            reader.onload = () => {
+               this.handleMessage(JSON.parse(reader.result as string));
+            };
+            reader.readAsText(event.data);
+          } else {
+            const msg = JSON.parse(event.data);
+            this.handleMessage(msg);
+          }
+        } catch (e) {
+          console.error("Error parsing message", e);
+        }
+      };
+
+      this.session.onerror = (e: any) => {
+         console.error('Live API error', e);
+         reject(e);
+      };
+
+      this.session.onclose = () => {
+         this.isConnected = false;
+         console.log('Session closed');
+      };
+    });
   }
 
   private async startMicrophone() {
@@ -137,26 +163,56 @@ export class GeminiLiveService {
     this.analyser.smoothingTimeConstant = 0.5;
   }
 
-  private setupAudioProcessing() {
+  private async setupAudioProcessing() {
     if (!this.audioContext || !this.mediaStream || !this.session) return;
 
-    const source = this.audioContext.createMediaStreamSource(this.mediaStream);
-    const processor = this.audioContext.createScriptProcessor(4096, 1, 1);
-
-    processor.onaudioprocess = (e) => {
-      if (this.isMicMuted || !this.isConnected || !this.session) return;
-      const pcm = this.float32ToPCM16(e.inputBuffer.getChannelData(0));
-      try {
-        this.session.sendRealtimeInput([{
-           mimeType: "audio/pcm;rate=16000",
-           data: this.arrayBufferToBase64(pcm)
-        }]);
-      } catch (err) { }
-    };
-    
-    source.connect(processor);
-    processor.connect(this.audioContext.destination);
-    source.connect(this.analyser!);
+    try {
+      const workletCode = `
+        class PCMProcessor extends AudioWorkletProcessor {
+          process(inputs, outputs, parameters) {
+            const input = inputs[0];
+            if (input.length > 0) {
+              const channelData = input[0];
+              const pcm16 = new Int16Array(channelData.length);
+              for (let i = 0; i < channelData.length; i++) {
+                const s = Math.max(-1, Math.min(1, channelData[i]));
+                pcm16[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
+              }
+              this.port.postMessage(pcm16.buffer, [pcm16.buffer]);
+            }
+            return true;
+          }
+        }
+        registerProcessor('pcm-processor', PCMProcessor);
+      `;
+      const blob = new Blob([workletCode], { type: 'application/javascript' });
+      const workletUrl = URL.createObjectURL(blob);
+      await this.audioContext.audioWorklet.addModule(workletUrl);
+      
+      const source = this.audioContext.createMediaStreamSource(this.mediaStream);
+      const workletNode = new AudioWorkletNode(this.audioContext, 'pcm-processor');
+      
+      workletNode.port.onmessage = (e) => {
+        if (this.isMicMuted || !this.isConnected || !this.session) return;
+        const base64 = this.arrayBufferToBase64(e.data);
+        try {
+          this.session.send(JSON.stringify({
+            realtimeInput: {
+              mediaChunks: [{
+                mimeType: "audio/pcm;rate=16000",
+                data: base64
+              }]
+            }
+          }));
+        } catch (err) { }
+      };
+      
+      source.connect(workletNode);
+      workletNode.connect(this.audioContext.destination);
+      source.connect(this.analyser!);
+    } catch (err) {
+      console.error("Failed to setup AudioWorklet", err);
+    }
   }
 
   private async handleMessage(msg: any) {
@@ -203,23 +259,25 @@ export class GeminiLiveService {
         }
       } else if (this.onCommand) {
         try {
-          this.onCommand(call.name, call.args || {});
-          this.sendToolResponse(call.id, { result: "Success" });
-        } catch (e) {
-           this.sendToolResponse(call.id, { error: "Execution failed" });
+          const result = await Promise.resolve(this.onCommand(call.name, call.args || {}));
+          this.sendToolResponse(call.id, result || { result: "Success" });
+        } catch (e: any) {
+           this.sendToolResponse(call.id, { error: e.message || "Execution failed" });
         }
       }
   }
 
   private sendToolResponse(callId: string, output: any) {
       if (!this.session || !this.isConnected) return;
-      this.session.sendToolResponse({
-         functionResponses: [{
+      this.session.send(JSON.stringify({
+        toolResponse: {
+          functionResponses: [{
              id: callId,
-             name: "",
+             name: "", // name isn't formally required if id is supplied, but good practice.
              response: { output }
-         }]
-      });
+          }]
+        }
+      }));
   }
 
   private tryParseToolCall(text: string) {
@@ -275,17 +333,29 @@ export class GeminiLiveService {
 
   public sendText(text: string) {
     if (!this.isConnected || !this.session) return;
-    this.session.send({ text });
+    this.session.send(JSON.stringify({
+      clientContent: {
+        turns: [{
+          role: "user",
+          parts: [{ text: text }]
+        }],
+        turnComplete: true
+      }
+    }));
   }
 
   public sendImage(base64Image: string) {
     this.latestFrame = base64Image;
     if (!this.isConnected || !this.session) return;
     const data = base64Image.includes(',') ? base64Image.split(',')[1] : base64Image;
-    this.session.sendRealtimeInput([{
-       mimeType: "image/jpeg",
-       data: data
-    }]);
+    this.session.send(JSON.stringify({
+      realtimeInput: {
+        mediaChunks: [{
+          mimeType: "image/jpeg",
+          data: data
+        }]
+      }
+    }));
   }
 
   public sendVideoFrame(base64Image: string, mimeType?: string) {
@@ -293,10 +363,14 @@ export class GeminiLiveService {
     if (mimeType) this.latestMimeType = mimeType;
     if (!this.isConnected || !this.session) return;
     const data = base64Image.includes(',') ? base64Image.split(',')[1] : base64Image;
-    this.session.sendRealtimeInput([{
-       mimeType: mimeType || "image/jpeg",
-       data: data
-    }]);
+    this.session.send(JSON.stringify({
+      realtimeInput: {
+        mediaChunks: [{
+          mimeType: mimeType || "image/jpeg",
+          data: data
+        }]
+      }
+    }));
   }
 
   disconnect() {
