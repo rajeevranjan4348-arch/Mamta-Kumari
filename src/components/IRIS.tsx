@@ -38,6 +38,7 @@ import {
   RiSendPlane2Line,
   RiUserLine,
   RiQuestionLine,
+  RiQuestionAnswerLine,
   RiZoomInLine,
   RiPhoneFill,
   RiGlobalLine,
@@ -60,6 +61,7 @@ import { WaveformIndicator } from './WaveformIndicator'
 import { PermissionsPanel } from './PermissionsPanel'
 import { usePermissionStore } from '../store/permissionStore'
 import { useAuditStore } from '../store/auditStore'
+import { MessageFeed } from './MessageFeed'
 
 const WorkFlowEditorView = lazy(() => import('../views/WorkFlowEditor'))
 const NotesView = lazy(() => import('../views/Notes'))
@@ -79,12 +81,14 @@ const AgentView = lazy(() => import('../views/Agent'))
 const BrowserView = lazy(() => import('../views/Browser'))
 const SystemView = lazy(() => import('../views/System'))
 const PluginsView = lazy(() => import('../views/Plugins'))
+const AskIrisView = lazy(() => import('../views/AskIris'))
 
 export interface IrisProps {
   isSystemActive: boolean
   toggleSystem: () => void
   isMicMuted: boolean
   toggleMic: () => void
+  handleMicTrigger?: () => Promise<void> | void
   isVideoOn: boolean
   visionMode: string
   startVision: (mode: 'camera' | 'screen', quality?: { width: number, height: number, frameRate: number }) => void
@@ -135,12 +139,19 @@ const IRIS = (props: IrisProps) => {
   useEffect(() => {
     activeTabRef.current = activeTab
   }, [activeTab])
+
+  useEffect(() => {
+    if (props.isSystemActive) {
+      setIsFeedVisible(true)
+    }
+  }, [props.isSystemActive])
   
   const [stats, setStats] = useState<any>(null)
   const [time, setTime] = useState<Date>(new Date())
   const [chatHistory, setChatHistory] = useState<any[]>([
     { role: 'assistant', content: 'IRIS System Initialized. Awaiting input.' }
   ])
+  const [isFeedVisible, setIsFeedVisible] = useState(false)
   const [showSourceModal, setShowSourceModal] = useState(false)
   const [globalInput, setGlobalInput] = useState('')
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -867,6 +878,14 @@ const IRIS = (props: IrisProps) => {
           </div>
           <div className="flex items-center gap-3">
             <div className="hidden lg:flex items-center gap-1 border-r border-white/10 pr-3">
+              <button
+                onClick={() => setIsFeedVisible(!isFeedVisible)}
+                className={`p-1.5 rounded hover:bg-white/10 transition-colors ${isFeedVisible ? 'text-emerald-400 bg-emerald-500/10' : 'text-zinc-500 hover:text-zinc-300'}`}
+                title="Toggle HUD live transcript feed"
+                aria-label="Toggle HUD live transcript feed"
+              >
+                <RiChat1Line size={16} />
+              </button>
               {[
                 { id: 'memory', icon: <RiBrainLine size={16} />, label: 'Memory' },
                 { id: 'calendar', icon: <RiCalendarEventLine size={16} />, label: 'Calendar' },
@@ -896,6 +915,7 @@ const IRIS = (props: IrisProps) => {
       >
         {[
           { id: 'DASHBOARD' },
+          { id: 'ASK_IRIS' },
           { id: 'APPS' },
           { id: 'CHAT' },
           { id: 'BROWSER' },
@@ -940,6 +960,7 @@ const IRIS = (props: IrisProps) => {
         <nav className="hidden md:flex flex-col items-center gap-4 py-6 w-16 bg-zinc-950/80 border-r border-white/5 z-40 overflow-y-auto scrollbar-none shrink-0 pointer-events-auto">
           {[
             { id: 'DASHBOARD', icon: <RiLayoutGridLine size={20} /> },
+            { id: 'ASK_IRIS', icon: <RiQuestionAnswerLine size={20} /> },
             { id: 'APPS', icon: <RiApps2Line size={20} /> },
             { id: 'CHAT', icon: <RiChat1Line size={20} /> },
             { id: 'BROWSER', icon: <RiGlobalLine size={20} /> },
@@ -997,6 +1018,7 @@ const IRIS = (props: IrisProps) => {
             {activeTab === 'MEMORY' && <MemoryView />}
             
             <Suspense fallback={<ViewSkeleton />}>
+              {activeTab === 'ASK_IRIS' && <AskIrisView onAskIris={handleAskIris} isSystemActive={props.isSystemActive} />}
               {activeTab === 'CODING' && <CodingView />}
               {activeTab === 'BROWSER' && <BrowserView />}
               {activeTab === 'SYSTEM' && <SystemView />}
@@ -1015,6 +1037,61 @@ const IRIS = (props: IrisProps) => {
             </Suspense>
           </motion.div>
         </AnimatePresence>
+
+        {/* Primary Microphone Trigger Button */}
+        <div className="absolute bottom-6 right-6 md:bottom-8 md:right-8 z-50 pointer-events-auto">
+          <motion.button
+            whileHover={{ scale: 1.05 }}
+            whileTap={{ scale: 0.95 }}
+            onClick={props.handleMicTrigger || (() => {
+              if (!props.isSystemActive) {
+                props.toggleSystem()
+              } else {
+                props.toggleMic()
+              }
+            })}
+            aria-label={
+              !props.isSystemActive 
+                ? "Activate Voice Session" 
+                : props.isMicMuted 
+                  ? "Unmute Microphone" 
+                  : "Mute Microphone"
+            }
+            className={`relative flex items-center justify-center w-14 h-14 rounded-full border shadow-2xl cursor-pointer transition-all duration-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 ${
+              !props.isSystemActive
+                ? 'bg-zinc-900/95 border-[#ff3a3a]/40 text-[#ff3a3a] hover:bg-[#ff3a3a]/10 hover:border-[#ff3a3a]/60 shadow-[0_0_15px_rgba(255,58,58,0.15)]'
+                : props.isMicMuted
+                  ? 'bg-amber-950/95 border-amber-500/40 text-amber-500 hover:bg-amber-900/40 hover:border-amber-500/60 shadow-[0_0_15px_rgba(245,158,11,0.15)]'
+                  : 'bg-emerald-500 border-emerald-400 text-black shadow-[0_0_25px_rgba(16,185,129,0.55)]'
+            }`}
+            title={
+              !props.isSystemActive 
+                ? "Start Voice Session" 
+                : props.isMicMuted 
+                  ? "Unmute Mic" 
+                  : "Mute Mic"
+            }
+          >
+            {/* Listening Ripple Anim */}
+            {props.isSystemActive && !props.isMicMuted && (
+              <>
+                <span className="absolute inset-0 rounded-full bg-emerald-500/40 animate-ping opacity-75" />
+                <span className="absolute -inset-1.5 rounded-full border-2 border-emerald-500/50 animate-pulse opacity-50" />
+              </>
+            )}
+
+            {!props.isSystemActive ? (
+              <div className="relative">
+                <RiMicOffLine size={24} />
+                <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-red-600 rounded-full border border-black animate-pulse" />
+              </div>
+            ) : props.isMicMuted ? (
+              <RiMicOffLine size={24} />
+            ) : (
+              <RiMicLine size={24} className="animate-pulse" />
+            )}
+          </motion.button>
+        </div>
       </main>
       </div>
 
@@ -1176,6 +1253,17 @@ const IRIS = (props: IrisProps) => {
             </motion.div>
           </>
         )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        <MessageFeed
+          chatHistory={chatHistory}
+          setChatHistory={setChatHistory}
+          isSystemActive={props.isSystemActive}
+          isMicMuted={props.isMicMuted}
+          isVisible={isFeedVisible}
+          onClose={() => setIsFeedVisible(false)}
+        />
       </AnimatePresence>
     </div>
   )

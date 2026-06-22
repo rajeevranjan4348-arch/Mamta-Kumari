@@ -73,6 +73,7 @@
   body {
     height: 100%;
     width: 100%;
+    min-width: 320px;
     background-color: black;
     color: white;
     overflow: hidden;
@@ -154,3 +155,69 @@
 .animate-pulse-emerald {
   animation: pulse-emerald 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
 }
+
+/* ASK IRIS EXACT CSS DESIGN */
+.ask-iris-app {
+  min-height: 100vh;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 20px;
+}
+
+@keyframes ask-iris-glow {
+  0%, 100% {
+    box-shadow: 0 0 5px rgba(0, 255, 179, 0.1);
+    border-color: rgba(0, 255, 179, 0.4);
+  }
+  50% {
+    box-shadow: 0 0 20px rgba(0, 255, 179, 0.4), inset 0 0 10px rgba(0, 255, 179, 0.1);
+    border-color: rgba(0, 255, 179, 1);
+  }
+}
+
+.ask-iris-card {
+  width: 100%;
+  max-width: 500px;
+  border: 1px solid #00ffb3;
+  border-radius: 20px;
+  padding: 24px;
+  background: #0a0a0a;
+  animation: ask-iris-glow 3s ease-in-out infinite;
+}
+
+.ask-iris-card h1 {
+  color: #00ffb3;
+  margin-bottom: 20px;
+}
+
+.ask-iris-card p {
+  font-size: 16px;
+  line-height: 1.6;
+  word-break: normal;
+  white-space: normal;
+  margin-bottom: 20px;
+}
+
+.ask-iris-card input {
+  width: 100%;
+  height: 50px;
+  border: 1px solid #00ffb3;
+  background: black;
+  color: white;
+  border-radius: 12px;
+  padding: 0 15px;
+}
+
+.ask-iris-card button {
+  width: 100%;
+  height: 50px;
+  margin-top: 15px;
+  border: none;
+  border-radius: 12px;
+  background: #00ffb3;
+  color: black;
+  font-weight: bold;
+  cursor: pointer;
+}
+

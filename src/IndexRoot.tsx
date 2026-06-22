@@ -186,6 +186,24 @@ const IndexRoot = () => {
     irisService.setMute(s)
   }
 
+  const handleMicTrigger = async () => {
+    const isGranted = localStorage.getItem('iris_permissions_granted') === 'true';
+    if (!isGranted) {
+      await requestPermissions();
+      if (localStorage.getItem('iris_permissions_granted') === 'true') {
+        if (!isSystemActive) {
+          await toggleSystem();
+        }
+      }
+    } else {
+      if (!isSystemActive) {
+        await toggleSystem();
+      } else {
+        toggleMic();
+      }
+    }
+  }
+
   const startVision = async (mode: 'camera' | 'screen', quality?: { width: number, height: number, frameRate: number }) => {
     if (!isSystemActive) return
     try {
@@ -480,7 +498,7 @@ const IndexRoot = () => {
   }, [])
 
   return (
-    <div className="flex flex-col h-[100dvh] w-screen bg-black overflow-hidden relative border border-emerald-500/20 rounded-xl">
+    <div className="flex flex-col h-[100dvh] w-screen min-w-[320px] bg-black overflow-hidden relative border border-emerald-500/20 rounded-xl">
       {isAppLocked && <AppLockScreen onUnlock={() => setIsAppLocked(false)} />}
       <div className="flex-1 relative">
         <IRIS
@@ -488,6 +506,7 @@ const IndexRoot = () => {
           toggleSystem={toggleSystem}
           isMicMuted={isMicMuted}
           toggleMic={toggleMic}
+          handleMicTrigger={handleMicTrigger}
           isVideoOn={isVideoOn}
           visionMode={visionMode}
           startVision={startVision}
@@ -529,7 +548,7 @@ const IndexRoot = () => {
               exit={{ opacity: 0 }}
               className="fixed inset-0 z-[1000] bg-black/85 backdrop-blur-md flex items-center justify-center p-2 xs:p-4 sm:p-6"
             >
-              <div className="bg-[#0a0a0c] border border-white/10 rounded-2xl max-w-sm w-full max-h-[92vh] overflow-y-auto custom-scrollbar p-4 sm:p-6 md:p-8 flex flex-col items-center text-center shadow-2xl mx-auto">
+              <div className="bg-[#0a0a0c] border border-white/10 rounded-2xl max-w-sm w-full min-w-[280px] max-h-[92vh] overflow-y-auto custom-scrollbar p-4 sm:p-6 md:p-8 flex flex-col items-center text-center shadow-2xl mx-auto">
                 <div className="w-12 h-12 sm:w-16 sm:h-16 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center mb-4 sm:mb-6 shrink-0">
                   <div className="text-emerald-400">
                     <svg stroke="currentColor" fill="currentColor" strokeWidth="0" viewBox="0 0 24 24" height="28" width="28" className="sm:w-8 sm:h-8" xmlns="http://www.w3.org/2000/svg"><path d="M21 13V11H18.9136C18.4357 8.35405 16.3262 6.24458 13.6803 5.76672C13.2505 3.6186 11.3364 2 9 2C6.23858 2 4 4.23858 4 7V17C4 19.7614 6.23858 22 9 22C11.3364 22 13.2505 20.3814 13.6803 18.2333C16.3262 17.7554 18.4357 15.6459 18.9136 13H21ZM12.0125 10.9786C11.9616 11.6425 11.6703 12.2594 11.1969 12.7328L10 13.9297V17C10 17.5523 9.55228 18 9 18C8.44772 18 8 17.5523 8 17V7C8 6.44772 8.44772 6 9 6C9.55228 6 10 6.44772 10 7V10.0703L11.1969 11.2672C11.6703 11.7406 11.9616 12.3575 12.0125 13.0214H16.8998C16.446 14.8624 14.9392 16.3055 13.0475 16.6808C12.5938 15.228 11.2825 14.159 10.6698 13.565L12.5693 11.6655C13.0381 11.1967 13.3362 10.551 13.4116 9.85191C13.5852 9.578 13.8016 9.33081 14.0537 9.12195L15.3371 10.4054L14.6299 11.1125L15.3371 11.8196L16.7513 10.4054L15.3371 8.99114L14.6299 9.69824L15.3371 10.4054C15.085 10.6143 14.8686 10.8615 14.6949 11.1354H16.8998C16.446 9.29446 14.9392 7.85139 13.0475 7.47607C12.8091 8.23933 12.4566 8.94827 12.0125 9.57143Z"></path></svg>

@@ -779,7 +779,7 @@ export default function DashboardView({
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="absolute inset-0 z-[200] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4"
+            className="absolute inset-0 z-[200] bg-black/85 backdrop-blur-sm flex items-center justify-center p-4 pointer-events-auto"
             onClick={() => setIsPopupOpen(false)}
           >
             <motion.div
@@ -787,84 +787,95 @@ export default function DashboardView({
               animate={{ scale: 1, opacity: 1, y: 0 }}
               exit={{ scale: 0.95, opacity: 0, y: 20 }}
               onClick={(e) => e.stopPropagation()}
-              className={`${glassPanel} w-full max-w-lg p-6 flex flex-col gap-4 border-emerald-500/30`}
+              className="ask-iris-card relative select-none"
             >
-              <div className="flex items-center justify-between border-b border-white/10 pb-4">
-                <h3 className="text-sm font-bold tracking-widest text-emerald-400 uppercase">Ask IRIS</h3>
-                <button
-                  onClick={() => setIsPopupOpen(false)}
-                  aria-label="Close Ask IRIS popup"
-                  className="text-zinc-500 hover:text-white transition-colors"
-                >
-                  <RiCloseLine size={24} aria-hidden="true" />
-                </button>
-              </div>
-              
-              <div className="flex flex-col gap-4">
-                <p className="text-xs text-zinc-400 font-mono">
-                  Type your question below. IRIS will respond using voice if the system is active.
-                </p>
-                <div className="relative flex items-center gap-2">
-                  <input
-                    type="text"
-                    value={questionText}
-                    onChange={(e) => setQuestionText(e.target.value)}
-                    placeholder="Ask anything..."
-                    aria-label="Ask anything"
-                    className="w-full bg-black/50 border border-white/10 rounded-xl py-4 pl-4 pr-20 text-sm text-white placeholder:text-zinc-600 focus:outline-none focus:border-emerald-500 transition-colors"
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' && questionText.trim()) {
+              <button
+                onClick={() => setIsPopupOpen(false)}
+                aria-label="Close Ask IRIS popup"
+                className="absolute top-4 right-4 text-zinc-500 hover:text-[#00ffb3] transition-colors"
+              >
+                <RiCloseLine size={24} aria-hidden="true" />
+              </button>
+
+              <h1 className="text-3xl font-bold tracking-tight">ASK IRIS</h1>
+
+              <p className="text-zinc-300">
+                Type your question below. IRIS will respond using voice if the system is active.
+              </p>
+
+              <div className="relative mt-6">
+                <input
+                  type="text"
+                  value={questionText}
+                  onChange={(e) => setQuestionText(e.target.value)}
+                  placeholder="Ask anything..."
+                  className="w-full bg-black text-white px-4 focus:outline-none focus:ring-2 focus:ring-[#00ffb3]/50 transition-all border border-[#00ffb3] rounded-xl"
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      if (questionText.trim()) {
                         playAction();
                         if (onAskIris) {
                           onAskIris(questionText);
-                        } else if (isSystemActive) {
+                        } else {
                           import('../services/Iris-voice-ai').then(({ irisService }) => {
                             irisService.sendText(questionText);
                           });
                         }
                         setQuestionText('');
+                        setIsPopupOpen(false);
                       }
-                    }}
-                  />
-                  <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
-                    <button
-                      onClick={() => {
-                        const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-                        if (SpeechRecognition) {
-                          const recognition = new SpeechRecognition();
-                          recognition.onresult = (event: any) => {
-                            const transcript = event.results[0][0].transcript;
-                            setQuestionText(prev => prev + ' ' + transcript);
-                          };
-                          recognition.start();
-                        } else {
-                          alert("Speech recognition is not supported in this browser.");
-                        }
-                      }}
-                      className="text-zinc-400 hover:text-emerald-400 p-2 transition-colors"
-                      title="Dictate"
-                      aria-label="Dictate message"
-                    >
-                      <RiMicLine size={20} aria-hidden="true" />
-                    </button>
-                    <button
-                      onClick={() => {
-                        if (questionText.trim()) {
-                          playAction();
-                          if (isSystemActive) {
-                            import('../services/Iris-voice-ai').then(({ irisService }) => {
-                              irisService.sendText(questionText);
-                            });
-                          }
-                          setQuestionText('');
-                        }
-                      }}
-                      aria-label="Send Message"
-                      className="text-emerald-500 hover:text-emerald-400 p-2 transition-colors"
-                    >
-                      <RiSendPlaneFill size={20} aria-hidden="true" />
-                    </button>
-                  </div>
+                    }
+                  }}
+                />
+              </div>
+
+              <button
+                onClick={() => {
+                  if (questionText.trim()) {
+                    playAction();
+                    if (onAskIris) {
+                      onAskIris(questionText);
+                    } else {
+                      import('../services/Iris-voice-ai').then(({ irisService }) => {
+                        irisService.sendText(questionText);
+                      });
+                    }
+                    setQuestionText('');
+                    setIsPopupOpen(false);
+                  }
+                }}
+                disabled={!questionText.trim()}
+                className="w-full h-[50px] mt-[15px] border-none rounded-xl font-bold cursor-pointer transition-all hover:bg-[#00d696] active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed bg-[#00ffb3] text-black"
+              >
+                Send
+              </button>
+
+              {/* Dictation options */}
+              <div className="mt-4 flex items-center justify-between border-t border-white/5 pt-3">
+                <button
+                  onClick={() => {
+                    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+                    if (SpeechRecognition) {
+                      const recognition = new SpeechRecognition();
+                      recognition.onresult = (event: any) => {
+                        const transcript = event.results[0][0].transcript;
+                        setQuestionText(prev => prev + ' ' + transcript);
+                      };
+                      recognition.start();
+                    } else {
+                      alert("Speech recognition is not supported in this browser.");
+                    }
+                  }}
+                  className="text-xs font-mono text-zinc-500 hover:text-[#00ffb3] transition-colors flex items-center gap-1.5"
+                  title="Dictate"
+                >
+                  <RiMicLine size={16} /> DICTATE VOICE
+                </button>
+                <div className="flex items-center gap-2">
+                  <span className={`w-2 h-2 rounded-full ${isSystemActive ? "bg-emerald-500 animate-pulse" : "bg-zinc-600"}`} />
+                  <span className="text-[10px] font-mono tracking-widest text-zinc-500 uppercase">
+                    {isSystemActive ? "ONLINE" : "STANDBY"}
+                  </span>
                 </div>
               </div>
             </motion.div>
